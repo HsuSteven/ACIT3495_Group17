@@ -1,60 +1,147 @@
+networks:
+  public-net:
+    driver: bridge
+  data-ingest-net:
+    driver: bridge
+  analytics-net:
+    driver: bridge
+
+volumes:
+  mysql_data:
+    driver: local
+  mongo_data:
+    driver: local
+
 services:
+  # ----------------------------------------------------
+  # Authentication Service
+  # ----------------------------------------------------
   auth:
     build:
       context: auth
       dockerfile: Dockerfile
+    container_name: auth
+    restart: unless-stopped
     ports:
-     - 8000:8000
+      - "8000:8000"
+    networks:
+      - public-net
 
+  # ----------------------------------------------------
+  # Enter Data Web App (Member 1)
+  # ----------------------------------------------------
   enter_data:
     build:
-      context: <FOLDER HERE>
+      context: enter-data
       dockerfile: Dockerfile
+    container_name: enter-data
+    restart: unless-stopped
     environment:
       AUTH_URL: http://auth:8000
-      MYSQL_URI: mysql://bcit:acit3485@mysql:3306/db
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_USER: bcit
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-acit3495}
+      MYSQL_DATABASE: db
     ports:
-     - PORT:PORT
-  
+      - "3000:3000"
+    networks:
+      - public-net
+      - data-ingest-net
+
+  # ----------------------------------------------------
+  # Show Results Web App (Member 3)
+  # ----------------------------------------------------
   show_results:
     build:
-      context: <FOLDER HERE>
+      context: show-results
       dockerfile: Dockerfile
+    container_name: show-results
+    restart: unless-stopped
     environment:
       AUTH_URL: http://auth:8000
       MONGO_URI: mongodb://bcit:acit3495@mongo:27017/db?authSource=admin
     ports:
-     - PORT:PORT
+      - "3001:3001"
+    networks:
+      - public-net
+      - analytics-net
 
+  # ----------------------------------------------------
+  # Analytics Service (Your Component)
+  # ----------------------------------------------------
   analytics:
     build:
-      context: <FOLDER HERE>
+      context: analytics-service
       dockerfile: Dockerfile
+    container_name: analytics-service
+    restart: unless-stopped
     environment:
-      MYSQL_URI: mysql://bcit:acit3485@mysql:3306/db
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_USER: bcit
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-acit3495}
+      MYSQL_DATABASE: db
       MONGO_URI: mongodb://bcit:acit3495@mongo:27017/db?authSource=admin
-    ports:
-     - PORT:PORT
+      MONGO_DATABASE: db
+      MONGO_COLLECTION: grade_analytics
+      POLL_INTERVAL_SECONDS: 5
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - data-ingest-net
+      - analytics-net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
 
+  # ----------------------------------------------------
+  # MongoDB: Internal Analytics Store
+  # ----------------------------------------------------
   mongo:
     image: mongodb/mongodb-community-server:8.0.34-ubi9-slim
-    container_name: mongodb  
+    container_name: mongodb
+    restart: unless-stopped
     environment:
       MONGO_INITDB_ROOT_USERNAME: bcit
-      MONGO_INITDB_ROOT_PASSWORD: acit3495
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD:-acit3495}
     volumes:
-     - mongo_data:/data/mongo
+      - mongo_data:/data/db
+    networks:
+      - analytics-net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 512M
 
+  # ----------------------------------------------------
+  # MySQL: Internal Raw Grades Store
+  # ----------------------------------------------------
   mysql:
-    image: mysql
+    image: mysql:8.4
     container_name: mysql_db
+    restart: unless-stopped
     environment:
-      MYSQL_RANDOM_ROOT_PASSWORD: 1
+      MYSQL_RANDOM_ROOT_PASSWORD: "1"
       MYSQL_USER: bcit
-      MYSQL_PASSWORD: acit3495
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-acit3495}
       MYSQL_DATABASE: db
     volumes:
-     - mysql_data:/data/mysql
-
-volumes:
-  mongo_data:
+      - mysql_data:/var/lib/mysql
+      - ./mysql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - data-ingest-net
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "bcit", "-pacit3495"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 512M
