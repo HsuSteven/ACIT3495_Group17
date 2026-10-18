@@ -1,0 +1,52 @@
+openapi: 3.0.3
+info:
+  title: Authentication Service Endpoint
+  version: 1.0.0
+paths:
+  /login:
+    post:
+      operationId: auth.verify
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - username
+                - password
+              properties:
+                username:
+                  type: string
+                password:
+                  type: string
+      responses:
+        '200':
+          description: Login success
+        '401':
+          description: Login failed (Invalid credentials)
+
+  /register:
+    post:
+      operationId: auth.store
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - username
+                - password
+              properties:
+                username:
+                  type: string
+                password:
+                  type: string
+      responses:
+        '201':
+          description: Register succeeded
+        '409':
+          description: Register failed (Username already exists)
+        '400':
+          description: Bad request (Missing fields)
