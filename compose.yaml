@@ -1,0 +1,60 @@
+services:
+  auth:
+    build:
+      context: auth
+      dockerfile: Dockerfile
+    ports:
+     - 8000:8000
+
+  enter_data:
+    build:
+      context: <FOLDER HERE>
+      dockerfile: Dockerfile
+    environment:
+      AUTH_URL: http://auth:8000
+      MYSQL_URI: mysql://bcit:acit3485@mysql:3306/db
+    ports:
+     - PORT:PORT
+  
+  show_results:
+    build:
+      context: <FOLDER HERE>
+      dockerfile: Dockerfile
+    environment:
+      AUTH_URL: http://auth:8000
+      MONGO_URI: mongodb://bcit:acit3495@mongo:27017/db?authSource=admin
+    ports:
+     - PORT:PORT
+
+  analytics:
+    build:
+      context: <FOLDER HERE>
+      dockerfile: Dockerfile
+    environment:
+      MYSQL_URI: mysql://bcit:acit3485@mysql:3306/db
+      MONGO_URI: mongodb://bcit:acit3495@mongo:27017/db?authSource=admin
+    ports:
+     - PORT:PORT
+
+  mongo:
+    image: mongodb/mongodb-community-server:8.0.34-ubi9-slim
+    container_name: mongodb  
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: bcit
+      MONGO_INITDB_ROOT_PASSWORD: acit3495
+    volumes:
+     - mongo_data:/data/mongo
+
+  mysql:
+    image: mysql
+    container_name: mysql_db
+    environment:
+      MYSQL_RANDOM_ROOT_PASSWORD: 1
+      MYSQL_USER: bcit
+      MYSQL_PASSWORD: acit3495
+      MYSQL_DATABASE: db
+    volumes:
+     - mysql_data:/data/mysql
+
+volumes:
+  mongo_data:
