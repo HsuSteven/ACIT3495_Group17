@@ -110,6 +110,7 @@ services:
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD:-acit3495}
     volumes:
       - mongo_data:/data/db
+      - ./mongo/init.js:/docker-entrypoint-initdb.d/init.js:ro
     networks:
       - analytics-net
     deploy:
