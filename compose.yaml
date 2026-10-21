@@ -11,6 +11,8 @@ volumes:
     driver: local
   mongo_data:
     driver: local
+  user_data:
+    driver: local
 
 services:
   # ----------------------------------------------------
@@ -26,6 +28,10 @@ services:
       - "8000:8000"
     networks:
       - public-net
+    volumes:
+      - user_data:/data
+    environment:
+      HASH_SALT: "6b4b8429e3a4bc457af19bd653de5ce5"
 
   # ----------------------------------------------------
   # Enter Data Web App (Member 1)
