@@ -43,11 +43,22 @@ services:
       MYSQL_USER: bcit
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-acit3495}
       MYSQL_DATABASE: db
+      SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET must be set in .env}
     ports:
       - "3000:3000"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      auth:
+        condition: service_started
     networks:
       - public-net
       - data-ingest-net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 128M
 
   # ----------------------------------------------------
   # Show Results Web App (Member 3)
