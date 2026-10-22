@@ -12,7 +12,7 @@ const app = createApp({
   authUrl: process.env.AUTH_URL,
   sessionSecret: process.env.SESSION_SECRET,
 });
-const port = Number(process.env.PORT || 3000);
+const port = Number(process.env.PORT || 3001);
 const server = app.listen(port, () =>
   console.info(`enter-data listening on port ${port}`),
 );
