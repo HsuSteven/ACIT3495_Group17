@@ -1,9 +1,15 @@
-const express = require('express');
-const session = require('express-session');
-const { validateGrade } = require('./validate');
+const express = require("express");
+const session = require("express-session");
+const { validateGrade } = require("./validate");
 
-const escape = (s) => String(s).replace(/[&<>"']/g, (c) =>
-  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const escape = (s) =>
+  String(s).replace(
+    /[&<>"']/g,
+    (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[
+        c
+      ],
+  );
 
 const STYLE = `
   :root { --bg:#f4f6fb; --card:#fff; --text:#1f2937; --muted:#6b7280; --border:#e5e7eb;
@@ -48,28 +54,40 @@ const page = (title, body, user) => `<!doctype html>
 <body>
   <header>
     <div class="brand">Grade Entry <span>· Data Collection System</span></div>
-    ${user ? `<div class="nav-right">Signed in as <strong>${escape(user)}</strong>
-      <form method="post" action="/logout"><button class="btn-ghost">Log out</button></form></div>` : ''}
+    ${
+      user
+        ? `<div class="nav-right">Signed in as <strong>${escape(user)}</strong>
+      <form method="post" action="/logout"><button class="btn-ghost">Log out</button></form></div>`
+        : ""
+    }
   </header>
   <main><div class="card">${body}</div></main>
   <footer>ACIT3495 · Group 17</footer>
 </body></html>`;
 
-const alert = (msg, kind) => (msg ? `<div class="alert ${kind}">${escape(msg)}</div>` : '');
+const alert = (msg, kind) =>
+  msg ? `<div class="alert ${kind}">${escape(msg)}</div>` : "";
 
-const loginForm = (msg = '') => page('Login', `
+const loginForm = (msg = "") =>
+  page(
+    "Login",
+    `
   <h1>Welcome back</h1>
   <p class="sub">Sign in to enter student grades.</p>
-  ${alert(msg, 'err')}
+  ${alert(msg, "err")}
   <form method="post" action="/login">
     <label for="username">Username</label>
     <input id="username" name="username" required maxlength="50" autocomplete="username">
     <label for="password">Password</label>
     <input id="password" name="password" type="password" required maxlength="100" autocomplete="current-password">
     <button class="btn">Sign in</button>
-  </form>`);
+  </form>`,
+  );
 
-const enterForm = (user, msg = '', kind = 'ok') => page('Enter Grade', `
+const enterForm = (user, msg = "", kind = "ok") =>
+  page(
+    "Enter Grade",
+    `
   <h1>Enter a grade</h1>
   <p class="sub">Grades are saved to the database and included in the next analytics run.</p>
   ${alert(msg, kind)}
@@ -87,86 +105,123 @@ const enterForm = (user, msg = '', kind = 'ok') => page('Enter Grade', `
       </div>
     </div>
     <button class="btn">Save grade</button>
-  </form>`, user);
+  </form>`,
+    user,
+  );
 
 function createApp({ pool, authUrl, sessionSecret }) {
   const app = express();
-  app.disable('x-powered-by');
-  app.use(express.urlencoded({ extended: false, limit: '10kb' }));
-  app.use(session({
-    secret: sessionSecret,
-    resave: false,
-    saveUninitialized: false,
-    cookie: { httpOnly: true, sameSite: 'lax', maxAge: 60 * 60 * 1000 },
-  }));
+  app.disable("x-powered-by");
+  app.use(express.urlencoded({ extended: false, limit: "10kb" }));
+  app.use(
+    session({
+      secret: sessionSecret,
+      resave: false,
+      saveUninitialized: false,
+      cookie: { httpOnly: true, sameSite: "lax", maxAge: 60 * 60 * 1000 },
+    }),
+  );
 
-  const requireAuth = (req, res, next) => (req.session.user ? next() : res.redirect('/login'));
+  const requireAuth = (req, res, next) =>
+    req.session.user ? next() : res.redirect("/login");
 
   // Health check: the app is only healthy if it can reach MySQL
-  app.get('/health', async (req, res) => {
+  app.get("/health", async (req, res) => {
     try {
-      await pool.query('SELECT 1');
-      res.json({ status: 'ok' });
+      await pool.query("SELECT 1");
+      res.json({ status: "ok" });
     } catch (err) {
-      console.error('health: mysql unavailable:', err.code || err.message);
-      res.status(503).json({ status: 'mysql unavailable' });
+      console.error("health: mysql unavailable:", err.code || err.message);
+      res.status(503).json({ status: "mysql unavailable" });
     }
   });
 
-  app.get('/', (req, res) => res.redirect(req.session.user ? '/enter' : '/login'));
-  app.get('/login', (req, res) => res.send(loginForm()));
+  app.get("/", (req, res) =>
+    res.redirect(req.session.user ? "/enter" : "/login"),
+  );
+  app.get("/login", (req, res) => res.send(loginForm()));
 
-  app.post('/login', async (req, res) => {
-    const username = String(req.body.username || '').trim();
-    const password = String(req.body.password || '');
-    if (!username || !password) return res.status(400).send(loginForm('Username and password are required'));
+  app.post("/login", async (req, res) => {
+    const username = String(req.body.username || "").trim();
+    const password = String(req.body.password || "");
+    if (!username || !password)
+      return res
+        .status(400)
+        .send(loginForm("Username and password are required"));
 
     let authRes;
     try {
       authRes = await fetch(`${authUrl}/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username, password }),
         signal: AbortSignal.timeout(3000),
       });
     } catch (err) {
-      console.error('login: auth service unreachable:', err.message);
-      return res.status(503).send(loginForm('Login is temporarily unavailable, try again shortly'));
+      console.error("login: auth service unreachable:", err.message);
+      return res
+        .status(503)
+        .send(loginForm("Login is temporarily unavailable, try again shortly"));
     }
 
     if (authRes.status !== 200) {
-      console.warn(`login failed for "${username}" (auth status ${authRes.status})`); // never log the password
-      return res.status(401).send(loginForm('Invalid username or password'));
+      console.warn(
+        `login failed for "${username}" (auth status ${authRes.status})`,
+      ); // never log the password
+      return res.status(401).send(loginForm("Invalid username or password"));
     }
 
     req.session.regenerate((err) => {
-      if (err) return res.status(500).send(loginForm('Session error'));
+      if (err) return res.status(500).send(loginForm("Session error"));
       req.session.user = username;
       console.info(`login ok for "${username}"`);
-      res.redirect('/enter');
+      res.redirect("/enter");
     });
   });
 
-  app.post('/logout', (req, res) => req.session.destroy(() => res.redirect('/login')));
+  app.post("/logout", (req, res) =>
+    req.session.destroy(() => res.redirect("/login")),
+  );
 
-  app.get('/enter', requireAuth, (req, res) => res.send(enterForm(req.session.user)));
+  app.get("/enter", requireAuth, (req, res) =>
+    res.send(enterForm(req.session.user)),
+  );
 
-  app.post('/enter', requireAuth, async (req, res) => {
+  app.post("/enter", requireAuth, async (req, res) => {
     const { errors, value } = validateGrade(req.body);
-    if (errors.length) return res.status(400).send(enterForm(req.session.user, errors.join('. '), 'err'));
+    if (errors.length)
+      return res
+        .status(400)
+        .send(enterForm(req.session.user, errors.join(". "), "err"));
 
     try {
       // Parameterized query: protects against SQL injection
       await pool.execute(
-        'INSERT INTO grades (student_id, course_code, score) VALUES (?, ?, ?)',
+        "INSERT INTO grades (student_id, course_code, score) VALUES (?, ?, ?)",
         [value.studentId, value.courseCode, value.score],
       );
-      console.info(`grade saved by "${req.session.user}": ${value.courseCode} ${value.score}`);
-      res.status(201).send(enterForm(req.session.user,
-        `Saved ${value.studentId} / ${value.courseCode} = ${value.score}`));
+      console.info(
+        `grade saved by "${req.session.user}": ${value.courseCode} ${value.score}`,
+      );
+      res
+        .status(201)
+        .send(
+          enterForm(
+            req.session.user,
+            `Saved ${value.studentId} / ${value.courseCode} = ${value.score}`,
+          ),
+        );
     } catch (err) {
-      console.error('insert failed:', err.code || err.message);
-      res.status(503).send(enterForm(req.session.user, 'Database unavailable, grade NOT saved. Try again shortly.', 'err'));
+      console.error("insert failed:", err.code || err.message);
+      res
+        .status(503)
+        .send(
+          enterForm(
+            req.session.user,
+            "Database unavailable, grade NOT saved. Try again shortly.",
+            "err",
+          ),
+        );
     }
   });
 
