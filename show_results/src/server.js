@@ -17,6 +17,4 @@ const server = app.listen(port, () =>
   console.info(`enter-data listening on port ${port}`),
 );
 
-process.on("SIGTERM", () =>
-  server.close(() => pool.end().then(() => process.exit(0))),
-);
+process.on("SIGTERM", () => server.close(() => process.exit(0)));
