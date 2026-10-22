@@ -1,6 +1,6 @@
 import { MongoClient } from "mongodb";
 
-const uri = "mongodb://bcit:acit3495@mongo:27017/db?authSource=admin";
+const uri = process.env.MONGO_URI;
 const client = new MongoClient(uri);
 
 async function fetchMongoData() {
