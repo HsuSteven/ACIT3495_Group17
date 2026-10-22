@@ -1,5 +1,4 @@
 const { createApp } = require("./app");
-const { createPool } = require("./db");
 
 const required = ["AUTH_URL", "SESSION_SECRET"];
 const missing = required.filter((k) => !process.env[k]);
