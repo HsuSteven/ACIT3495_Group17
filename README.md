@@ -42,7 +42,7 @@ cd ACIT3495_Group17
 Create a `.env` file in the project root directory alongside `compose.yaml`:
 
 ```env
-SESSION_SECRET=my_super_secret_session_key_12345
+JWT_SECRET=my_super_secret_session_key_12345
 MYSQL_PASSWORD=acit3495
 MONGO_INITDB_ROOT_PASSWORD=acit3495
 ```
