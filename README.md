@@ -45,6 +45,7 @@ Create a `.env` file in the project root directory alongside `compose.yaml`:
 JWT_SECRET=my_super_secret_session_key_12345
 MYSQL_PASSWORD=acit3495
 MONGO_INITDB_ROOT_PASSWORD=acit3495
+HASH_SALT=very_salty_salt
 ```
 ## 3. Use App
 Launch:

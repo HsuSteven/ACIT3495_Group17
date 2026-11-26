@@ -1,0 +1,435 @@
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: repo-pv
+spec:
+  storageClassName: manual
+  capacity:
+    storage: 500Mi
+  accessModes: ["ReadWriteOnce"]
+  hostPath:
+    path: __PROJECT_DIR__
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: repo-pvc
+spec:
+  storageClassName: manual
+  volumeName: repo-pv
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 500Mi
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: auth-pv
+spec:
+  storageClassName: manual
+  capacity:
+    storage: 500Mi
+  accessModes: ["ReadWriteOnce"]
+  hostPath:
+    path: /mnt/project1/auth-data
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: auth-pvc
+spec:
+  storageClassName: manual
+  volumeName: auth-pv
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 500Mi
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: mongo-pv
+spec:
+  storageClassName: manual
+  capacity:
+    storage: 500Mi
+  accessModes: ["ReadWriteOnce"]
+  hostPath:
+    path: /mnt/project1/mongo-data
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mongo-pvc
+spec:
+  storageClassName: manual
+  volumeName: mongo-pv
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 500Mi
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: mysql-pv
+spec:
+  storageClassName: manual
+  capacity:
+    storage: 500Mi
+  accessModes: ["ReadWriteOnce"]
+  hostPath:
+    path: /mnt/project1/mysql-data
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mysql-pvc
+spec:
+  storageClassName: manual
+  volumeName: mysql-pv
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 500Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: auth
+  template:
+    metadata:
+      labels:
+        app: auth
+    spec:
+      containers:
+      - name: auth
+        image: python:3.14-slim
+        ports:
+        - containerPort: 8000
+        command: ["sh", "-c", "cd /repo/auth && pip install 'connexion[uvicorn]' PyJWT && exec uvicorn app:app --host 0.0.0.0 --port 8000"]
+        env:
+          - name: HASH_SALT
+            valueFrom:
+              secretKeyRef:
+                name: app-secrets
+                key: HASH_SALT
+          - name: JWT_SECRET
+            valueFrom:
+              secretKeyRef:
+                name: app-secrets
+                key: JWT_SECRET
+        volumeMounts:
+          - name: repo
+            mountPath: /repo
+          - name: auth-data
+            mountPath: /data
+      volumes:
+        - name: repo
+          persistentVolumeClaim:
+            claimName: repo-pvc
+        - name: auth-data
+          persistentVolumeClaim:
+            claimName: auth-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: auth
+spec:
+  selector:
+    app: auth
+  ports:
+  - port: 8000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: enter-data
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: enter-data
+  template:
+    metadata:
+      labels:
+        app: enter-data
+    spec:
+      containers:
+      - name: enter-data
+        image: node:22-alpine
+        ports:
+        - containerPort: 3000
+        command: ["sh", "-c", "cp -r /repo/enter-data /tmp/app && cd /tmp/app && npm ci --omit=dev && exec node src/server.js"]
+        env:
+          - name: NODE_ENV
+            value: "production"
+          - name: AUTH_URL
+            value: "http://auth:8000"
+          - name: MYSQL_HOST
+            value: "mysql"
+          - name: MYSQL_PORT
+            value: "3306"
+          - name: MYSQL_USER
+            value: "bcit"
+          - name: MYSQL_DATABASE
+            value: "db"
+          - name: MYSQL_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: app-secrets
+                key: MYSQL_PASSWORD
+          - name: JWT_SECRET
+            valueFrom:
+              secretKeyRef:
+                name: app-secrets
+                key: JWT_SECRET
+        volumeMounts:
+          - name: repo
+            mountPath: /repo
+      volumes:
+        - name: repo
+          persistentVolumeClaim:
+            claimName: repo-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: enter-data
+spec:
+  selector:
+    app: enter-data
+  ports:
+  - port: 3000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: show-results
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: show-results
+  template:
+    metadata:
+      labels:
+        app: show-results
+    spec:
+      containers:
+      - name: show-results
+        image: node:22-alpine
+        ports:
+        - containerPort: 3001
+        command: ["sh", "-c", "cp -r /repo/show-results /tmp/app && cd /tmp/app && npm ci --omit=dev && exec node src/server.js"]
+        env:
+          - name: NODE_ENV
+            value: "production"
+          - name: AUTH_URL
+            value: "http://auth:8000"
+          - name: MONGO_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: app-secrets
+                key: MONGO_INITDB_ROOT_PASSWORD
+          - name: MONGO_URI
+            value: "mongodb://bcit:$(MONGO_PASSWORD)@mongo:27017/analyticsdb?authSource=admin"
+          - name: MONGO_DATABASE
+            value: "analyticsdb"
+          - name: MONGO_COLLECTION
+            value: "grade_analytics"
+          - name: JWT_SECRET
+            valueFrom:
+              secretKeyRef:
+                name: app-secrets
+                key: JWT_SECRET
+        volumeMounts:
+          - name: repo
+            mountPath: /repo
+      volumes:
+        - name: repo
+          persistentVolumeClaim:
+            claimName: repo-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: show-results
+spec:
+  selector:
+    app: show-results
+  ports:
+  - port: 3001
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: analytics-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: analytics-service
+  template:
+    metadata:
+      labels:
+        app: analytics-service
+    spec:
+      containers:
+      - name: analytics-service
+        image: python:3.12-slim
+        command: ["sh", "-c", "cd /repo/analytics && pip install -r requirements.txt && exec python -u app.py"]
+        env:
+          - name: MYSQL_HOST
+            value: "mysql"
+          - name: MYSQL_PORT
+            value: "3306"
+          - name: MYSQL_USER
+            value: "bcit"
+          - name: MYSQL_DATABASE
+            value: "db"
+          - name: MYSQL_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: app-secrets
+                key: MYSQL_PASSWORD
+          - name: MONGO_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: app-secrets
+                key: MONGO_INITDB_ROOT_PASSWORD
+          - name: MONGO_URI
+            value: "mongodb://bcit:$(MONGO_PASSWORD)@mongo:27017/analyticsdb?authSource=admin"
+          - name: MONGO_DATABASE
+            value: "analyticsdb"
+          - name: MONGO_COLLECTION
+            value: "grade_analytics"
+          - name: POLL_INTERVAL_SECONDS
+            value: "5"
+        volumeMounts:
+          - name: repo
+            mountPath: /repo
+      volumes:
+        - name: repo
+          persistentVolumeClaim:
+            claimName: repo-pvc
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mongo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mongo
+  template:
+    metadata:
+      labels:
+        app: mongo
+    spec:
+      containers:
+      - name: mongo
+        image: mongodb/mongodb-community-server:8.0.34-ubi9-slim
+        ports:
+        - containerPort: 27017
+        securityContext:
+          runAsUser: 0
+        env:
+          - name: MONGO_INITDB_ROOT_USERNAME
+            value: "bcit"
+          - name: MONGO_INITDB_ROOT_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: app-secrets
+                key: MONGO_INITDB_ROOT_PASSWORD
+        volumeMounts:
+          - name: mongo-data
+            mountPath: /data/db
+          - name: repo
+            mountPath: /repo
+          - name: repo
+            mountPath: /docker-entrypoint-initdb.d/init.js
+            subPath: mongo/init.js
+      volumes:
+        - name: repo
+          persistentVolumeClaim:
+            claimName: repo-pvc
+        - name: mongo-data
+          persistentVolumeClaim:
+            claimName: mongo-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongo
+spec:
+  selector:
+    app: mongo
+  ports:
+  - port: 27017
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mysql
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mysql
+  template:
+    metadata:
+      labels:
+        app: mysql
+    spec:
+      containers:
+      - name: mysql
+        image: mysql:8.4
+        ports:
+        - containerPort: 3306
+        env:
+          - name: MYSQL_RANDOM_ROOT_PASSWORD
+            value: "1"
+          - name: MYSQL_USER
+            value: "bcit"
+          - name: MYSQL_DATABASE
+            value: "db"
+          - name: MYSQL_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: app-secrets
+                key: MYSQL_PASSWORD
+        volumeMounts:
+          - name: mysql-data
+            mountPath: /var/lib/mysql
+            subPath: mysql
+          - name: repo
+            mountPath: /repo
+          - name: repo
+            mountPath: /docker-entrypoint-initdb.d/init.sql
+            subPath: mysql/init.sql
+      volumes:
+        - name: repo
+          persistentVolumeClaim:
+            claimName: repo-pvc
+        - name: mysql-data
+          persistentVolumeClaim:
+            claimName: mysql-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql
+spec:
+  selector:
+    app: mysql
+  ports:
+  - port: 3306
