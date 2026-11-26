@@ -1,5 +1,5 @@
 const express = require("express");
-const session = require("express-session");
+const { verifyToken, readCookie } = require("./jwt");
 
 const escape = (s) =>
   String(s).replace(
@@ -26,6 +26,9 @@ const STYLE = `
   main { flex:1; display:flex; justify-content:center; align-items:flex-start; padding:56px 16px; }
   .card { background:var(--card); width:100%; max-width:440px; border:1px solid var(--border);
           border-radius:14px; padding:32px; box-shadow:0 12px 32px rgba(15,23,42,.07); }
+  .card.wide { max-width:760px; overflow-x:auto; }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  th, td { text-align:left; padding:10px 8px; border-bottom:1px solid var(--border); }
   h1 { font-size:22px; margin:0 0 6px; }
   .sub { color:var(--muted); margin:0 0 24px; font-size:14px; }
   label { display:block; font-size:14px; font-weight:500; margin-bottom:6px; }
@@ -43,10 +46,12 @@ const STYLE = `
   .alert { padding:10px 12px; border-radius:8px; font-size:14px; margin-bottom:18px; }
   .alert.ok { background:#ecfdf5; color:#047857; border:1px solid #a7f3d0; }
   .alert.err { background:#fef2f2; color:#b91c1c; border:1px solid #fecaca; }
+  .switch { text-align:center; font-size:14px; color:var(--muted); margin:18px 0 0; }
+  .switch a { color:var(--primary); }
   footer { text-align:center; color:var(--muted); font-size:12px; padding:20px; }
 `;
 
-const page = (title, body, user) => `<!doctype html>
+const page = (title, body, user, wide) => `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${title} · Results Page</title><style>${STYLE}</style></head>
@@ -60,51 +65,149 @@ const page = (title, body, user) => `<!doctype html>
         : ""
     }
   </header>
-  <main><div class="card">${body}</div></main>
+  <main><div class="card${wide ? " wide" : ""}">${body}</div></main>
   <footer>ACIT3495 · Group 17</footer>
 </body></html>`;
 
 const alert = (msg, kind) =>
   msg ? `<div class="alert ${kind}">${escape(msg)}</div>` : "";
 
-const loginForm = (msg = "") =>
+const loginForm = (msg = "", kind = "err") =>
   page(
     "Login",
     `
   <h1>Welcome back</h1>
   <p class="sub">Sign in to access student grades.</p>
-  ${alert(msg, "err")}
+  ${alert(msg, kind)}
   <form method="post" action="/login">
     <label for="username">Username</label>
     <input id="username" name="username" required maxlength="50" autocomplete="username">
     <label for="password">Password</label>
     <input id="password" name="password" type="password" required maxlength="100" autocomplete="current-password">
     <button class="btn">Sign in</button>
-  </form>`,
+  </form>
+  <p class="switch">No account? <a href="/register">Register</a></p>`,
   );
 
-function createApp({ authUrl, sessionSecret }) {
+const registerForm = (msg = "") =>
+  page(
+    "Register",
+    `
+  <h1>Create an account</h1>
+  <p class="sub">Register to access student grades.</p>
+  ${alert(msg, "err")}
+  <form method="post" action="/register">
+    <label for="username">Username</label>
+    <input id="username" name="username" required minlength="3" maxlength="50" pattern="[A-Za-z0-9_.\\-]+" autocomplete="username">
+    <label for="password">Password (at least 8 characters)</label>
+    <input id="password" name="password" type="password" required minlength="8" maxlength="100" autocomplete="new-password">
+    <button class="btn">Register</button>
+  </form>
+  <p class="switch">Already registered? <a href="/login">Sign in</a></p>`,
+  );
+
+const resultsPage = (user, docs, error = "") => {
+  const columns = [
+    ["course_code", "Course"],
+    ["total_submissions", "Count"],
+    ["min_grade", "Min"],
+    ["max_grade", "Max"],
+    ["avg_grade", "Average"],
+  ];
+  const rows = docs
+    .map((d) => `<tr>${columns.map(([k]) => `<td>${escape(d[k] ?? "")}</td>`).join("")}</tr>`)
+    .join("");
+  let content = `<table><thead><tr>${columns.map(([, label]) => `<th>${label}</th>`).join("")}</tr></thead>
+  <tbody>${rows}</tbody></table>`;
+  if (!docs.length) content = `<p class="sub">No results yet.</p>`;
+  if (error) content = alert(error, "err");
+  return page(
+    "Results",
+    `<h1>Course results</h1>
+  <p class="sub">Grade statistics calculated by the analytics service.</p>
+  ${content}`,
+    user,
+    true,
+  );
+};
+
+const COOKIE = "results.token";
+const COOKIE_OPTIONS = { httpOnly: true, sameSite: "lax", path: "/" };
+
+function createApp({ authUrl, jwtSecret, store }) {
   const app = express();
   app.disable("x-powered-by");
-  app.use(express.urlencoded({ extended: false, limit: "10kb" }));
-  app.use(
-    session({
-      secret: sessionSecret,
-      resave: false,
-      saveUninitialized: false,
-      cookie: { httpOnly: true, sameSite: "lax", maxAge: 60 * 60 * 1000 },
-    }),
-  );
-
-  const requireAuth = (req, res, next) =>
-    req.session.user ? next() : res.redirect("/login");
-
   // Health check: the app is only healthy if it can reach MongoDB
+  app.get("/health", async (req, res) => {
+    try {
+      await store.ping();
+      res.json({ status: "ok" });
+    } catch (err) {
+      console.error("health: mongodb unavailable:", err.message);
+      res.status(503).json({ status: "mongodb unavailable" });
+    }
+  });
 
-  app.get("/", (req, res) =>
-    res.redirect(req.session.user ? "/enter" : "/login"),
+  app.use(express.urlencoded({ extended: false, limit: "10kb" }));
+
+  // Logged out: everything except /register goes to /login.
+  // Logged in: /login and /register go to the main page.
+  app.use((req, res, next) => {
+    // The JWT is checked on every request, so expired tokens stop working
+    const claims = verifyToken(readCookie(req, COOKIE), jwtSecret);
+    req.user = claims ? claims.sub : null;
+
+    // Express ignores case and trailing slashes, so match the same way
+    const path = req.path.toLowerCase().replace(/\/+$/, "");
+    const isAuthPage = path === "/login" || path === "/register";
+    if (req.user) {
+      return isAuthPage ? res.redirect("/results") : next();
+    }
+    return isAuthPage ? next() : res.redirect("/login");
+  });
+
+  const callAuth = (route, body) =>
+    fetch(`${authUrl}${route}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(3000),
+    });
+
+  app.get("/login", (req, res) =>
+    res.send(
+      req.query.registered
+        ? loginForm("Account created. You can sign in now.", "ok")
+        : loginForm(),
+    ),
   );
-  app.get("/login", (req, res) => res.send(loginForm()));
+
+  app.get("/register", (req, res) => res.send(registerForm()));
+
+  app.post("/register", async (req, res) => {
+    const username = String(req.body.username || "").trim();
+    const password = String(req.body.password || "");
+    const fail = (status, msg) => res.status(status).send(registerForm(msg));
+
+    if (!/^[A-Za-z0-9_.-]{3,50}$/.test(username))
+      return fail(400, "Username must be 3-50 letters, numbers, dots, dashes or underscores");
+    if (password.length < 8 || password.length > 100)
+      return fail(400, "Password must be 8-100 characters");
+
+    let authRes;
+    try {
+      authRes = await callAuth("/register", { username, password });
+    } catch (err) {
+      console.error("register: auth service unreachable:", err.message);
+      return fail(503, "Registration is temporarily unavailable, try again shortly");
+    }
+
+    if (authRes.status === 201) return res.redirect("/login?registered=1");
+    if (authRes.status === 409) return fail(409, "That username is already taken");
+    if (authRes.status === 400) return fail(400, "Registration details were rejected");
+    console.error(`register: auth status ${authRes.status}`);
+    return fail(503, "Registration is temporarily unavailable, try again shortly");
+  });
 
   app.post("/login", async (req, res) => {
     const username = String(req.body.username || "").trim();
@@ -116,14 +219,16 @@ function createApp({ authUrl, sessionSecret }) {
 
     let authRes;
     try {
-      authRes = await fetch(`${authUrl}/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password }),
-        signal: AbortSignal.timeout(3000),
-      });
+      authRes = await callAuth("/login", { username, password });
     } catch (err) {
       console.error("login: auth service unreachable:", err.message);
+      return res
+        .status(503)
+        .send(loginForm("Login is temporarily unavailable, try again shortly"));
+    }
+
+    if (authRes.status >= 500) {
+      console.error(`login: auth status ${authRes.status}`);
       return res
         .status(503)
         .send(loginForm("Login is temporarily unavailable, try again shortly"));
@@ -136,24 +241,41 @@ function createApp({ authUrl, sessionSecret }) {
       return res.status(401).send(loginForm("Invalid username or password"));
     }
 
-    req.session.regenerate((err) => {
-      if (err) return res.status(500).send(loginForm("Session error"));
-      req.session.user = username;
-      console.info(`login ok for "${username}"`);
-      res.redirect("/results");
+    const body = await authRes.json().catch(() => null);
+    const claims = verifyToken(body?.token, jwtSecret);
+    if (!claims) {
+      console.error("login: invalid token from auth service, check that JWT_SECRET matches");
+      return res
+        .status(503)
+        .send(loginForm("Login is temporarily unavailable, try again shortly"));
+    }
+
+    res.cookie(COOKIE, body.token, {
+      ...COOKIE_OPTIONS,
+      expires: new Date(claims.exp * 1000),
     });
+    console.info(`login ok for "${claims.sub}"`);
+    res.redirect("/results");
   });
 
-  app.post("/logout", (req, res) =>
-    req.session.destroy(() => res.redirect("/login")),
-  );
-
-  app.get("/results", requireAuth, (req, res) => {
-    const doc = fetchMongoData()[0];
-    const prettyJson = JSON.stringify(doc, null, 2);
-
-    res.send(`<pre>${prettyJson}</pre>`);
+  app.post("/logout", (req, res) => {
+    res.clearCookie(COOKIE, COOKIE_OPTIONS);
+    res.redirect("/login");
   });
+
+  app.get("/results", async (req, res) => {
+    try {
+      const docs = await store.fetchMongoData();
+      res.send(resultsPage(req.user, docs));
+    } catch (err) {
+      console.error("results: mongodb query failed:", err.message);
+      res
+        .status(503)
+        .send(resultsPage(req.user, [], "Results are unavailable, try again shortly"));
+    }
+  });
+
+  app.use((req, res) => res.redirect("/results"));
 
   return app;
 }

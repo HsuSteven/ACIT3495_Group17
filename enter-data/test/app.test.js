@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const request = require('supertest');
+const crypto = require('node:crypto');
 const { createApp } = require('../src/app');
 const { validateGrade } = require('../src/validate');
 
@@ -12,7 +13,13 @@ function fakePool() {
     execute: async (sql, params) => { calls.push(params); return [{ insertId: 1 }]; },
   };
 }
-const make = (pool) => createApp({ pool, authUrl: 'http://auth', sessionSecret: 'test' });
+const SECRET = 'test-secret-that-is-at-least-32-bytes';
+const encode = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
+function makeToken(exp = Math.floor(Date.now() / 1000) + 60, secret = SECRET) {
+  const data = `${encode({ alg: 'HS256', typ: 'JWT' })}.${encode({ sub: 'u', exp })}`;
+  return `${data}.${crypto.createHmac('sha256', secret).update(data).digest('base64url')}`;
+}
+const make = (pool) => createApp({ pool, authUrl: 'http://auth', jwtSecret: SECRET });
 
 test('validation rejects bad input', () => {
   assert.ok(validateGrade({ student_id: 'x', course_code: 'ACIT3495', score: '50' }).errors.length);
@@ -33,11 +40,18 @@ test('bad credentials return 401', async (t) => {
 });
 
 test('logged-in user can save a grade', async (t) => {
-  t.mock.method(global, 'fetch', async () => ({ status: 200 }));
+  t.mock.method(global, 'fetch', async () => ({ status: 200, json: async () => ({ token: makeToken() }) }));
   const pool = fakePool();
   const agent = request.agent(make(pool));
   await agent.post('/login').type('form').send({ username: 'u', password: 'p' }).expect(302);
   await agent.post('/enter').type('form')
     .send({ student_id: 'A01234567', course_code: 'acit3495', score: '88.5' }).expect(201);
   assert.deepEqual(pool.calls[0], ['A01234567', 'ACIT3495', 88.5]);
+});
+
+test('expired or forged tokens are rejected', async () => {
+  for (const token of [makeToken(1), makeToken(undefined, 'wrong-secret'), 'junk']) {
+    const res = await request(make(fakePool())).get('/enter').set('Cookie', `enter.token=${token}`);
+    assert.equal(res.headers.location, '/login');
+  }
 });

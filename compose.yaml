@@ -32,6 +32,7 @@ services:
       - user_data:/data
     environment:
       HASH_SALT: "6b4b8429e3a4bc457af19bd653de5ce5"
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in .env}
 
   # ----------------------------------------------------
   # Enter Data Web App (Member 1)
@@ -49,7 +50,7 @@ services:
       MYSQL_USER: bcit
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-acit3495}
       MYSQL_DATABASE: db
-      SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET must be set in .env}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in .env}
     ports:
       - "3000:3000"
     depends_on:
@@ -77,9 +78,17 @@ services:
     restart: unless-stopped
     environment:
       AUTH_URL: http://auth:8000
-      MONGO_URI: mongodb://bcit:acit3495@mongo:27017/db?authSource=admin
+      MONGO_URI: mongodb://bcit:${MONGO_INITDB_ROOT_PASSWORD:-acit3495}@mongo:27017/db?authSource=admin
+      MONGO_DATABASE: db
+      MONGO_COLLECTION: grade_analytics
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in .env}
     ports:
       - "3001:3001"
+    depends_on:
+      mongo:
+        condition: service_started
+      auth:
+        condition: service_started
     networks:
       - public-net
       - analytics-net
@@ -99,13 +108,15 @@ services:
       MYSQL_USER: bcit
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-acit3495}
       MYSQL_DATABASE: db
-      MONGO_URI: mongodb://bcit:acit3495@mongo:27017/db?authSource=admin
+      MONGO_URI: mongodb://bcit:${MONGO_INITDB_ROOT_PASSWORD:-acit3495}@mongo:27017/db?authSource=admin
       MONGO_DATABASE: db
       MONGO_COLLECTION: grade_analytics
       POLL_INTERVAL_SECONDS: 5
     depends_on:
       mysql:
         condition: service_healthy
+      mongo:
+        condition: service_started
     networks:
       - data-ingest-net
       - analytics-net
@@ -154,10 +165,11 @@ services:
     networks:
       - data-ingest-net
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "bcit", "-pacit3495"]
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u\"$$MYSQL_USER\" -p\"$$MYSQL_PASSWORD\" --silent"]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 30s
     deploy:
       resources:
         limits:

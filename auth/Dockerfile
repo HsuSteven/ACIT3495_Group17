@@ -6,7 +6,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip install connexion[uvicorn]
+RUN pip install connexion[uvicorn] PyJWT
 
 COPY *.py /service/
 COPY auth.yaml /service/

@@ -5,7 +5,7 @@ info:
 paths:
   /login:
     post:
-      operationId: auth.verify
+      operationId: app.verify
       requestBody:
         required: true
         content:
@@ -28,7 +28,7 @@ paths:
 
   /register:
     post:
-      operationId: auth.store
+      operationId: app.store
       requestBody:
         required: true
         content:
